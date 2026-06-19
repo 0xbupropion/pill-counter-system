@@ -1,0 +1,8 @@
+.venv
+__pycache__
+.DS_Store
+Final_Poster_Project_Pill_Recgonizer/dino_weights
+Final_Poster_Project_Pill_Recgonizer/weights
+Final_Poster_Project_Pill_Recgonizer/dino_cropped_dataset.zip
+Final_Poster_Project_Pill_Recgonizer/**/*.ipynb
+Final_Poster_Project_Pill_Recgonizer/Jupyter Notebook (gpu_setup).lnk
