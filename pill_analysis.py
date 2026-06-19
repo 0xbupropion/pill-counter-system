@@ -19,6 +19,7 @@ class RegionCandidate:
     fill_ratio: float
     centroid: tuple[float, float]
     split_count: int
+    confidence: float
 
 
 class OptionalTorchClassifier:
@@ -54,7 +55,7 @@ class PillAnalysisEngine:
                 "border-aware foreground separation",
                 "contrast enhancement",
                 "distance-map overlap split",
-                "shape-based pill classification",
+                "same-scene pill-like object filtering",
             ],
         }
 
@@ -66,15 +67,13 @@ class PillAnalysisEngine:
         rgb = np.asarray(image, dtype=np.uint8)
         candidates = self._segment_candidates(rgb)
 
-        counts = {"tablet": 0, "capsule": 0, "needle": 0}
         items: list[dict[str, Any]] = []
+        total_count = 0
 
         for index, candidate in enumerate(candidates, start=1):
             crop = self._crop_region(image, candidate.bbox, padding_ratio=0.16)
             model_result = self.classifier.classify(crop)
-            pill_type = self._shape_based_form(candidate)
-
-            counts[pill_type] += candidate.split_count
+            total_count += candidate.split_count
             items.append(
                 {
                     "index": index,
@@ -84,9 +83,8 @@ class PillAnalysisEngine:
                         "right": candidate.bbox[3],
                         "bottom": candidate.bbox[2],
                     },
-                    "type": pill_type,
                     "pillName": model_result["pill_name"],
-                    "confidence": model_result["confidence"],
+                    "confidence": candidate.confidence,
                     "shapeSummary": {
                         "aspectRatio": round(candidate.aspect_ratio, 2),
                         "solidity": round(candidate.fill_ratio, 2),
@@ -98,20 +96,18 @@ class PillAnalysisEngine:
             )
 
         annotated = self._build_annotated_image(image, items)
-        total_count = sum(counts.values())
 
         return {
             "ok": True,
             "sourceFile": filename,
-            "counts": counts,
             "totalCount": total_count,
             "items": items,
             "annotatedImage": annotated,
             "modelReady": False,
             "modelStatus": self.classifier.status,
             "notes": [
-                "背景接近時，這版會混合背景色差、灰階對比與邊緣強度來抓前景。",
-                "物件重疊時，這版會用距離圖估計分裂數量，盡量避免把多顆藥丸算成一顆。",
+                "這版只統計同一畫面裡像藥丸或藥品的顆粒數，不再分錠劑、膠囊、針頭。",
+                "背景接近時會綜合背景色差、局部對比與邊緣；重疊時會用距離圖估計分裂數量。",
             ],
             "debug": {
                 "regions": len(items),
@@ -166,7 +162,7 @@ class PillAnalysisEngine:
         labels, count = ndi.label(mask)
         objects = ndi.find_objects(labels)
         image_area = rgb.shape[0] * rgb.shape[1]
-        candidates: list[RegionCandidate] = []
+        raw_candidates: list[RegionCandidate] = []
 
         for label_index in range(count):
             slices = objects[label_index]
@@ -193,7 +189,7 @@ class PillAnalysisEngine:
             centroid = ndi.center_of_mass(region_mask)
             split_count = self._estimate_piece_count(region_mask, area, aspect_ratio, fill_ratio)
 
-            candidates.append(
+            raw_candidates.append(
                 RegionCandidate(
                     area=area,
                     bbox=(y0, x0, y1, x1),
@@ -201,9 +197,11 @@ class PillAnalysisEngine:
                     fill_ratio=float(fill_ratio),
                     centroid=(float(y0 + centroid[0]), float(x0 + centroid[1])),
                     split_count=split_count,
+                    confidence=0.0,
                 )
             )
 
+        candidates = self._filter_same_scene_candidates(raw_candidates)
         candidates.sort(key=lambda item: (item.bbox[0], item.bbox[1]))
         return candidates
 
@@ -244,12 +242,50 @@ class PillAnalysisEngine:
 
         return 1
 
-    def _shape_based_form(self, candidate: RegionCandidate) -> str:
-        if candidate.aspect_ratio >= 4.0 and candidate.fill_ratio <= 0.34:
-            return "needle"
-        if candidate.aspect_ratio >= 1.55:
-            return "capsule"
-        return "tablet"
+    def _filter_same_scene_candidates(
+        self, candidates: list[RegionCandidate]
+    ) -> list[RegionCandidate]:
+        if not candidates:
+            return []
+
+        pill_like = [
+            candidate
+            for candidate in candidates
+            if 1.0 <= candidate.aspect_ratio <= 4.8
+            and 0.2 <= candidate.fill_ratio <= 0.96
+            and candidate.area >= 80
+        ]
+        if not pill_like:
+            return []
+
+        median_area = float(np.median([candidate.area for candidate in pill_like]))
+        median_aspect = float(np.median([candidate.aspect_ratio for candidate in pill_like]))
+        filtered: list[RegionCandidate] = []
+        for candidate in pill_like:
+            area_ratio = candidate.area / max(1.0, median_area)
+            aspect_gap = abs(candidate.aspect_ratio - median_aspect)
+            if not (0.35 <= area_ratio <= 3.8):
+                continue
+            if aspect_gap > max(1.4, median_aspect * 0.9):
+                continue
+
+            confidence = 1.0
+            confidence -= min(0.35, abs(area_ratio - 1.0) * 0.16)
+            confidence -= min(0.25, aspect_gap * 0.12)
+            confidence -= min(0.2, abs(candidate.fill_ratio - 0.62) * 0.45)
+            filtered.append(
+                RegionCandidate(
+                    area=candidate.area,
+                    bbox=candidate.bbox,
+                    aspect_ratio=candidate.aspect_ratio,
+                    fill_ratio=candidate.fill_ratio,
+                    centroid=candidate.centroid,
+                    split_count=candidate.split_count,
+                    confidence=max(0.35, round(confidence, 3)),
+                )
+            )
+
+        return filtered
 
     def _crop_region(
         self, image: Image.Image, bbox: tuple[int, int, int, int], padding_ratio: float
@@ -269,8 +305,6 @@ class PillAnalysisEngine:
         canvas = image.copy()
         draw = ImageDraw.Draw(canvas)
         font = ImageFont.load_default()
-        colors = {"tablet": "#eba638", "capsule": "#63c949", "needle": "#ef6f74"}
-        labels = {"tablet": "錠劑", "capsule": "膠囊", "needle": "針頭"}
 
         for item in items:
             bbox = item["bbox"]
@@ -280,9 +314,9 @@ class PillAnalysisEngine:
                 bbox["right"],
                 bbox["bottom"],
             )
-            color_hex = colors[item["type"]]
+            color_hex = "#4d9cff"
             suffix = f" x{item['pieces']}" if item.get("pieces", 1) > 1 else ""
-            label = f"{item['index']}. {labels[item['type']]}{suffix}"
+            label = f"{item['index']}. 候選顆粒{suffix}"
 
             draw.rectangle((left, top, right, bottom), outline=color_hex, width=4)
             text_box = draw.textbbox((left, top), label, font=font)
