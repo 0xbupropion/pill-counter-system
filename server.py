@@ -10,6 +10,7 @@ from pill_analysis import PillAnalysisEngine
 
 
 ROOT = Path(__file__).resolve().parent
+REMOVED_PAGES = {"privacy-policy.html", "terms-of-service.html", "about.html"}
 app = Flask(__name__, static_folder=str(ROOT), static_url_path="")
 engine = PillAnalysisEngine(ROOT)
 
@@ -60,6 +61,8 @@ def api_preflight():
 
 @app.get("/<path:path>")
 def static_proxy(path: str):
+    if path in REMOVED_PAGES:
+        return ("", 404)
     target = ROOT / path
     if target.is_file():
         return send_from_directory(ROOT, path)
