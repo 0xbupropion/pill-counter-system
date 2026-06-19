@@ -41,26 +41,10 @@
       </section>
 
       <section class="control-panel">
-        <div class="toggle-row">
-          <span class="toggle-label">動態標記</span>
-          <label class="switch">
-            <input id="annotationToggle" type="checkbox" />
-            <span class="switch-slider"></span>
-          </label>
-        </div>
-
         <div class="count-grid">
-          <article class="count-card count-tablet">
-            <span class="count-chip">錠劑</span>
-            <strong id="tabletCount" class="count-value">0</strong>
-          </article>
-          <article class="count-card count-capsule">
-            <span class="count-chip">膠囊</span>
-            <strong id="capsuleCount" class="count-value">0</strong>
-          </article>
-          <article class="count-card count-needle">
-            <span class="count-chip">針頭</span>
-            <strong id="needleCount" class="count-value">0</strong>
+          <article class="count-card count-total">
+            <span class="count-chip">總顆數</span>
+            <strong id="totalCount" class="count-value">0</strong>
           </article>
         </div>
 
@@ -89,16 +73,8 @@
 
           <div class="result-count-grid">
             <div class="result-count-box">
-              <span>錠劑</span>
-              <strong id="modelTabletCount">0</strong>
-            </div>
-            <div class="result-count-box">
-              <span>膠囊</span>
-              <strong id="modelCapsuleCount">0</strong>
-            </div>
-            <div class="result-count-box">
-              <span>針頭</span>
-              <strong id="modelNeedleCount">0</strong>
+              <span>辨識總數</span>
+              <strong id="modelTotalCount">0</strong>
             </div>
           </div>
 
@@ -122,7 +98,7 @@
 
       <section class="result-panel item-panel">
         <div class="panel-head">
-          <h2>單顆辨識結果</h2>
+          <h2>候選物件結果</h2>
         </div>
         <div id="pillItems" class="pill-item-grid">
           <article class="pill-item empty-pill-item">
@@ -133,13 +109,6 @@
     </main>
 
     <footer class="site-footer">
-      <nav class="footer-links" aria-label="頁尾連結">
-        <a href="privacy-policy.html">隱私權政策</a>
-        <span>|</span>
-        <a href="terms-of-service.html">服務條款</a>
-        <span>|</span>
-        <a href="about.html">關於本系統</a>
-      </nav>
       <p>Che Lab Prototype</p>
       <p>Copyright © 2026 Pill Counter Demo.</p>
       <p>all rights reserved.</p>
