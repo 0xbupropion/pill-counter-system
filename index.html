@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>藥丸計數系統</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-glow page-glow-left"></div>
+    <div class="page-glow page-glow-right"></div>
+
+    <main class="app-shell">
+      <header class="top-controls">
+        <label class="camera-select-wrap" for="cameraSelect">
+          <select id="cameraSelect" class="camera-select" aria-label="選擇攝影鏡頭">
+            <option value="">請選擇攝影鏡頭</option>
+          </select>
+        </label>
+        <button id="flipButton" class="btn btn-blue" type="button">顛倒</button>
+        <button id="logoutButton" class="btn btn-orange" type="button">登出</button>
+      </header>
+      <input id="uploadInput" type="file" accept="image/*" hidden />
+
+      <p class="quota">Usage / Quota: Unlimited</p>
+
+      <section class="preview-panel" aria-label="即時預覽">
+        <div class="preview-stage" id="previewStage">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="preview-empty" id="previewEmpty">
+            <p class="preview-status" id="statusLabel">正在準備鏡頭...</p>
+            <p class="preview-hint">鏡頭一開啟就會自動開始計數</p>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="processingStatus">初始化中</span>
+        </div>
+      </section>
+
+      <section class="control-panel">
+        <div class="toggle-row">
+          <span class="toggle-label">動態標記</span>
+          <label class="switch">
+            <input id="annotationToggle" type="checkbox" />
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+
+        <div class="count-grid">
+          <article class="count-card count-tablet">
+            <span class="count-chip">錠劑</span>
+            <strong id="tabletCount" class="count-value">0</strong>
+          </article>
+          <article class="count-card count-capsule">
+            <span class="count-chip">膠囊</span>
+            <strong id="capsuleCount" class="count-value">0</strong>
+          </article>
+          <article class="count-card count-needle">
+            <span class="count-chip">針頭</span>
+            <strong id="needleCount" class="count-value">0</strong>
+          </article>
+        </div>
+
+        <div class="action-row">
+          <button id="countButton" class="btn btn-primary" type="button">啟動計數</button>
+          <button id="confirmButton" class="btn btn-secondary" type="button" disabled>
+            確認標記
+          </button>
+        </div>
+
+        <p id="helperText" class="helper-text">等待鏡頭授權後會自動開始分析。</p>
+
+        <div class="model-action-row">
+          <button id="uploadTrigger" class="btn btn-tertiary" type="button">上傳圖片分析</button>
+          <button id="reviewFrameButton" class="btn btn-tertiary" type="button">覆核目前畫面</button>
+        </div>
+      </section>
+
+      <section class="product-panels">
+        <article class="result-panel">
+          <div class="panel-head">
+            <h2>正式模型分析</h2>
+            <span id="modelAvailabilityBadge" class="availability-badge">檢查中</span>
+          </div>
+          <p id="modelStatusText" class="panel-copy">正在檢查後端模型狀態...</p>
+
+          <div class="result-count-grid">
+            <div class="result-count-box">
+              <span>錠劑</span>
+              <strong id="modelTabletCount">0</strong>
+            </div>
+            <div class="result-count-box">
+              <span>膠囊</span>
+              <strong id="modelCapsuleCount">0</strong>
+            </div>
+            <div class="result-count-box">
+              <span>針頭</span>
+              <strong id="modelNeedleCount">0</strong>
+            </div>
+          </div>
+
+          <div id="analysisMeta" class="analysis-meta">
+            <p>尚未上傳圖片或覆核鏡頭畫面。</p>
+          </div>
+        </article>
+
+        <article class="result-panel">
+          <div class="panel-head">
+            <h2>分析預覽</h2>
+          </div>
+          <div class="analysis-preview-card">
+            <img id="analysisPreview" alt="分析預覽" />
+            <div id="analysisEmpty" class="analysis-empty">
+              上傳圖片後，這裡會顯示切割與標記結果。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="result-panel item-panel">
+        <div class="panel-head">
+          <h2>單顆辨識結果</h2>
+        </div>
+        <div id="pillItems" class="pill-item-grid">
+          <article class="pill-item empty-pill-item">
+            <p>尚未產生辨識結果。</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-links" aria-label="頁尾連結">
+        <a href="privacy-policy.html">隱私權政策</a>
+        <span>|</span>
+        <a href="terms-of-service.html">服務條款</a>
+        <span>|</span>
+        <a href="about.html">關於本系統</a>
+      </nav>
+      <p>Che Lab Prototype</p>
+      <p>Copyright © 2026 Pill Counter Demo.</p>
+      <p>all rights reserved.</p>
+      <p>version 1.0.0</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
