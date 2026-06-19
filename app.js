@@ -7,7 +7,6 @@ const processingStatus = document.getElementById("processingStatus");
 const statusDot = document.getElementById("statusDot");
 const helperText = document.getElementById("helperText");
 const cameraSelect = document.getElementById("cameraSelect");
-const annotationToggle = document.getElementById("annotationToggle");
 const countButton = document.getElementById("countButton");
 const confirmButton = document.getElementById("confirmButton");
 const flipButton = document.getElementById("flipButton");
@@ -21,47 +20,30 @@ const analysisMeta = document.getElementById("analysisMeta");
 const analysisPreview = document.getElementById("analysisPreview");
 const analysisEmpty = document.getElementById("analysisEmpty");
 const pillItems = document.getElementById("pillItems");
-
-const countElements = {
-  tablet: document.getElementById("tabletCount"),
-  capsule: document.getElementById("capsuleCount"),
-  needle: document.getElementById("needleCount"),
-};
-
-const modelCountElements = {
-  tablet: document.getElementById("modelTabletCount"),
-  capsule: document.getElementById("modelCapsuleCount"),
-  needle: document.getElementById("modelNeedleCount"),
-};
+const totalCountElement = document.getElementById("totalCount");
+const modelTotalCountElement = document.getElementById("modelTotalCount");
 
 const workerCanvas = document.createElement("canvas");
 const workerCtx = workerCanvas.getContext("2d", { willReadFrequently: true });
-workerCanvas.width = 192;
-workerCanvas.height = 144;
+workerCanvas.width = 224;
+workerCanvas.height = 168;
 
 const snapshotCanvas = document.createElement("canvas");
-
-const CLASS_STYLES = {
-  tablet: { color: "#eca728", label: "錠劑" },
-  capsule: { color: "#63c949", label: "膠囊" },
-  needle: { color: "#ef6f74", label: "針頭" },
-};
+const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8000";
 
 const state = {
   stream: null,
   deviceId: "",
-  mirrored: false,
+  inverted: false,
   counting: false,
   rafId: 0,
   lastFrameAt: 0,
-  frameGap: 120,
+  frameGap: 140,
   countHistory: [],
-  displayCounts: { tablet: 0, capsule: 0, needle: 0 },
+  displayCount: 0,
   detections: [],
   reviewBusy: false,
 };
-
-const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8000";
 
 function getApiBase() {
   if (window.location.protocol === "file:") {
@@ -99,7 +81,7 @@ async function canReachLocalApi(timeoutMs = 1200) {
       signal: controller.signal,
     });
     return response.ok;
-  } catch (error) {
+  } catch {
     return false;
   } finally {
     window.clearTimeout(timeoutId);
@@ -130,33 +112,25 @@ function setHelper(message) {
   helperText.textContent = message;
 }
 
-function totalCount(counts) {
-  return counts.tablet + counts.capsule + counts.needle;
-}
-
 function updateButtons() {
   if (!state.stream) {
     countButton.textContent = "啟動計數";
     confirmButton.disabled = true;
   } else {
     countButton.textContent = state.counting ? "停止計數" : "繼續計數";
-    confirmButton.disabled = totalCount(state.displayCounts) === 0;
+    confirmButton.disabled = state.displayCount === 0;
   }
 
   reviewFrameButton.disabled = state.reviewBusy || !state.stream;
   uploadTrigger.disabled = state.reviewBusy;
 }
 
-function updateCountUI(counts) {
-  Object.entries(counts).forEach(([key, value]) => {
-    countElements[key].textContent = String(value);
-  });
+function updateCountUI(count) {
+  totalCountElement.textContent = String(count);
 }
 
-function updateModelCountUI(counts = { tablet: 0, capsule: 0, needle: 0 }) {
-  Object.entries(counts).forEach(([key, value]) => {
-    modelCountElements[key].textContent = String(value);
-  });
+function updateModelCountUI(count = 0) {
+  modelTotalCountElement.textContent = String(count);
 }
 
 async function enumerateCameras(selectedDeviceId = "") {
@@ -199,6 +173,12 @@ function stopStream() {
   video.srcObject = null;
 }
 
+function applyPreviewOrientation() {
+  const transform = state.inverted ? "rotate(180deg)" : "rotate(0deg)";
+  video.style.transform = transform;
+  overlayCanvas.style.transform = transform;
+}
+
 async function startCamera(deviceId = "") {
   stopStream();
   setStatus("正在連接鏡頭", "正在連接鏡頭...", false);
@@ -215,6 +195,7 @@ async function startCamera(deviceId = "") {
   state.stream = stream;
   video.srcObject = stream;
   await video.play();
+  applyPreviewOrientation();
 
   const currentTrack = stream.getVideoTracks()[0];
   const settings = currentTrack.getSettings();
@@ -223,16 +204,16 @@ async function startCamera(deviceId = "") {
   await enumerateCameras(state.deviceId);
   previewEmpty.classList.add("is-hidden");
   setStatus("鏡頭已開啟，正在分析", "即時計數中", true);
-  setHelper("即時計數使用前端快速偵測；下方可用正式模型做覆核。");
+  setHelper("目前版本只統計同一畫面中的藥丸或藥品顆粒數。");
   startCounting();
 }
 
 function resetCounts() {
   state.countHistory = [];
-  state.displayCounts = { tablet: 0, capsule: 0, needle: 0 };
+  state.displayCount = 0;
   state.detections = [];
-  updateCountUI(state.displayCounts);
-  drawOverlay([]);
+  updateCountUI(0);
+  clearOverlay();
   updateButtons();
 }
 
@@ -257,88 +238,71 @@ function processFrame(timestamp) {
 
   if (timestamp - state.lastFrameAt >= state.frameGap) {
     state.lastFrameAt = timestamp;
-    const detections = detectPills();
+    const detections = detectGranules();
     state.detections = detections;
 
-    const rawCounts = countDetections(detections);
-    pushCountHistory(rawCounts);
-    state.displayCounts = smoothCounts();
-    updateCountUI(state.displayCounts);
-    drawOverlay(detections);
+    const rawCount = detections.reduce((sum, detection) => sum + detection.pieces, 0);
+    pushCountHistory(rawCount);
+    state.displayCount = smoothCount();
+    updateCountUI(state.displayCount);
+    clearOverlay();
     updateButtons();
 
-    const total = totalCount(state.displayCounts);
-    if (total > 0) {
-      setHelper(`即時計數目前估計 ${total} 個物件，可用下方正式模型覆核。`);
+    if (state.displayCount > 0) {
+      setHelper(`即時計數目前估計 ${state.displayCount} 顆，可用下方分析再做確認。`);
     } else {
-      setHelper("目前尚未看到清楚的前景物件，請讓藥丸和背景有明顯對比。");
+      setHelper("目前尚未看到明顯的藥丸前景，請讓物件集中並和背景分開。");
     }
   }
 
   state.rafId = requestAnimationFrame(processFrame);
 }
 
-function pushCountHistory(counts) {
-  state.countHistory.push(counts);
+function pushCountHistory(count) {
+  state.countHistory.push(count);
   if (state.countHistory.length > 5) {
     state.countHistory.shift();
   }
 }
 
-function smoothCounts() {
-  const keys = ["tablet", "capsule", "needle"];
-  const smoothed = { tablet: 0, capsule: 0, needle: 0 };
-
-  keys.forEach((key) => {
-    const values = state.countHistory.map((counts) => counts[key]).sort((a, b) => a - b);
-    smoothed[key] = values[Math.floor(values.length / 2)] || 0;
-  });
-
-  return smoothed;
+function smoothCount() {
+  const values = [...state.countHistory].sort((a, b) => a - b);
+  return values[Math.floor(values.length / 2)] || 0;
 }
 
-function countDetections(detections) {
-  return detections.reduce(
-    (acc, detection) => {
-      acc[detection.type] += detection.pieces;
-      return acc;
-    },
-    { tablet: 0, capsule: 0, needle: 0 },
-  );
-}
-
-function detectPills() {
-  const width = workerCanvas.width;
-  const height = workerCanvas.height;
-
-  workerCtx.save();
-  workerCtx.clearRect(0, 0, width, height);
-  if (state.mirrored) {
-    workerCtx.translate(width, 0);
-    workerCtx.scale(-1, 1);
+function drawFrameToCanvas(targetCanvas, targetCtx, width, height) {
+  targetCanvas.width = width;
+  targetCanvas.height = height;
+  targetCtx.save();
+  targetCtx.clearRect(0, 0, width, height);
+  if (state.inverted) {
+    targetCtx.translate(width, height);
+    targetCtx.rotate(Math.PI);
   }
-  workerCtx.drawImage(video, 0, 0, width, height);
-  workerCtx.restore();
+  targetCtx.drawImage(video, 0, 0, width, height);
+  targetCtx.restore();
+}
 
-  const { data } = workerCtx.getImageData(0, 0, width, height);
-  const mask = createForegroundMask(data, width, height);
-  const refinedMask = refineMask(mask, width, height);
-  const components = extractComponents(refinedMask, width, height);
-
+function detectGranules() {
+  drawFrameToCanvas(workerCanvas, workerCtx, workerCanvas.width, workerCanvas.height);
+  const { data } = workerCtx.getImageData(0, 0, workerCanvas.width, workerCanvas.height);
+  const mask = createForegroundMask(data, workerCanvas.width, workerCanvas.height);
+  const refinedMask = refineMask(mask, workerCanvas.width, workerCanvas.height);
+  const components = extractComponents(refinedMask, workerCanvas.width, workerCanvas.height);
   if (!components.length) {
     return [];
   }
 
-  const validAreas = components
-    .map((component) => component.area)
-    .filter((area) => area > 40)
-    .sort((a, b) => a - b);
-  const referenceArea = validAreas[Math.floor(validAreas.length / 2)] || 60;
+  const filteredComponents = filterPillLikeComponents(components);
+  if (!filteredComponents.length) {
+    return [];
+  }
 
-  return components
-    .filter((component) => component.area > 40)
-    .map((component) => classifyComponent(component, referenceArea, width, height))
-    .filter(Boolean);
+  const referenceArea = median(
+    filteredComponents.map((component) => component.area).filter((area) => area > 36),
+  ) || 60;
+
+  return filteredComponents.map((component) => buildDetection(component, referenceArea));
 }
 
 function createForegroundMask(data, width, height) {
@@ -370,10 +334,10 @@ function createForegroundMask(data, width, height) {
   }
 
   const bg = {
-    r: sumR / sampleCount,
-    g: sumG / sampleCount,
-    b: sumB / sampleCount,
-    luma: sumLuma / sampleCount,
+    r: sumR / Math.max(1, sampleCount),
+    g: sumG / Math.max(1, sampleCount),
+    b: sumB / Math.max(1, sampleCount),
+    luma: sumLuma / Math.max(1, sampleCount),
   };
 
   const mask = new Uint8Array(width * height);
@@ -387,8 +351,9 @@ function createForegroundMask(data, width, height) {
       (r - bg.r) ** 2 + (g - bg.g) ** 2 + (b - bg.b) ** 2,
     );
     const luminanceDistance = Math.abs(luma - bg.luma);
-
-    mask[i] = colorDistance > 36 || luminanceDistance > 22 ? 1 : 0;
+    const redBalance = r - (g + b) * 0.5;
+    mask[i] =
+      colorDistance > 30 || luminanceDistance > 18 || Math.abs(redBalance) > 20 ? 1 : 0;
   }
 
   return mask;
@@ -438,14 +403,11 @@ function extractComponents(mask, width, height) {
 
     const queue = [index];
     visited[index] = 1;
-
     let area = 0;
     let minX = width;
     let maxX = 0;
     let minY = height;
     let maxY = 0;
-    let sumX = 0;
-    let sumY = 0;
 
     while (queue.length) {
       const current = queue.pop();
@@ -457,8 +419,6 @@ function extractComponents(mask, width, height) {
       maxX = Math.max(maxX, x);
       minY = Math.min(minY, y);
       maxY = Math.max(maxY, y);
-      sumX += x;
-      sumY += y;
 
       neighbors.forEach(([dx, dy]) => {
         const nx = x + dx;
@@ -475,101 +435,99 @@ function extractComponents(mask, width, height) {
       });
     }
 
+    const boxWidth = maxX - minX + 1;
+    const boxHeight = maxY - minY + 1;
+    const aspectRatio = Math.max(boxWidth, boxHeight) / Math.max(1, Math.min(boxWidth, boxHeight));
+    const fillRatio = area / Math.max(1, boxWidth * boxHeight);
+
     components.push({
       area,
       minX,
       maxX,
       minY,
       maxY,
-      centroidX: sumX / area,
-      centroidY: sumY / area,
+      width: boxWidth,
+      height: boxHeight,
+      aspectRatio,
+      fillRatio,
     });
   }
 
   return components;
 }
 
-function classifyComponent(component, referenceArea, frameWidth, frameHeight) {
-  const width = component.maxX - component.minX + 1;
-  const height = component.maxY - component.minY + 1;
-  const aspectRatio = Math.max(width, height) / Math.max(1, Math.min(width, height));
-  const density = component.area / (width * height);
-  const pieces =
-    component.area > referenceArea * 1.9
-      ? Math.min(4, Math.round(component.area / referenceArea))
-      : 1;
-
-  let type = "tablet";
-  if (aspectRatio >= 3.2 || density <= 0.2) {
-    type = "needle";
-  } else if (aspectRatio >= 1.55) {
-    type = "capsule";
+function filterPillLikeComponents(components) {
+  const base = components.filter((component) => component.area > 36 && component.area < 5000);
+  if (!base.length) {
+    return [];
   }
 
+  const medianArea = median(base.map((component) => component.area)) || 80;
+  const medianAspect = median(base.map((component) => component.aspectRatio)) || 1.4;
+
+  return base.filter((component) => {
+    const areaRatio = component.area / Math.max(1, medianArea);
+    const aspectGap = Math.abs(component.aspectRatio - medianAspect);
+    const looksPillLike =
+      component.fillRatio >= 0.2 &&
+      component.fillRatio <= 0.95 &&
+      component.aspectRatio >= 1 &&
+      component.aspectRatio <= 4.8;
+    const fitsScene =
+      areaRatio >= 0.35 &&
+      areaRatio <= 3.8 &&
+      aspectGap <= Math.max(1.4, medianAspect * 0.9);
+    return looksPillLike && fitsScene;
+  });
+}
+
+function buildDetection(component, referenceArea) {
+  const pieces =
+    component.area > referenceArea * 2.15
+      ? Math.min(4, Math.max(1, Math.round(component.area / Math.max(1, referenceArea))))
+      : 1;
+
   return {
-    type,
     pieces,
-    x: component.minX / frameWidth,
-    y: component.minY / frameHeight,
-    width: width / frameWidth,
-    height: height / frameHeight,
-    centroidX: component.centroidX / frameWidth,
-    centroidY: component.centroidY / frameHeight,
+    x: component.minX / workerCanvas.width,
+    y: component.minY / workerCanvas.height,
+    width: component.width / workerCanvas.width,
+    height: component.height / workerCanvas.height,
+    aspectRatio: component.aspectRatio,
+    fillRatio: component.fillRatio,
   };
 }
 
-function drawOverlay(detections) {
+function median(values) {
+  if (!values.length) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function clearOverlay() {
   const rect = video.getBoundingClientRect();
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
-
   if (overlayCanvas.width !== width || overlayCanvas.height !== height) {
     overlayCanvas.width = width;
     overlayCanvas.height = height;
   }
-
   overlayCtx.clearRect(0, 0, width, height);
-
-  if (!annotationToggle.checked) {
-    return;
-  }
-
-  overlayCtx.lineWidth = 3;
-  overlayCtx.font = "600 14px 'Noto Sans TC', sans-serif";
-  overlayCtx.textBaseline = "top";
-
-  detections.forEach((detection) => {
-    const style = CLASS_STYLES[detection.type];
-    const boxX = detection.x * width;
-    const boxY = detection.y * height;
-    const boxWidth = detection.width * width;
-    const boxHeight = detection.height * height;
-    const label = `${style.label}${detection.pieces > 1 ? ` x${detection.pieces}` : ""}`;
-
-    overlayCtx.strokeStyle = style.color;
-    overlayCtx.fillStyle = `${style.color}22`;
-    overlayCtx.fillRect(boxX, boxY, boxWidth, boxHeight);
-    overlayCtx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-
-    const textWidth = overlayCtx.measureText(label).width;
-    overlayCtx.fillStyle = style.color;
-    overlayCtx.fillRect(boxX, Math.max(0, boxY - 24), textWidth + 18, 22);
-    overlayCtx.fillStyle = "#fff";
-    overlayCtx.fillText(label, boxX + 9, Math.max(2, boxY - 22));
-  });
 }
 
 function announceConfirmation() {
-  const counts = state.displayCounts;
-  if (totalCount(counts) === 0) {
+  if (state.displayCount === 0) {
     return;
   }
 
-  setHelper(`已確認目前標記：錠劑 ${counts.tablet}、膠囊 ${counts.capsule}、針頭 ${counts.needle}。`);
+  setHelper(`已確認目前畫面，共 ${state.displayCount} 顆。`);
 }
 
 function resetAnalysisPane() {
-  updateModelCountUI();
+  updateModelCountUI(0);
   analysisPreview.src = "";
   analysisPreview.classList.remove("is-visible");
   analysisEmpty.classList.remove("is-hidden");
@@ -603,7 +561,7 @@ async function syncHealthStatus() {
       modelAvailabilityBadge.classList.add("is-ready");
       modelAvailabilityBadge.classList.remove("is-fallback");
     } else {
-      modelAvailabilityBadge.textContent = "強化分割模式";
+      modelAvailabilityBadge.textContent = "同場一致性辨識";
       modelAvailabilityBadge.classList.add("is-fallback");
       modelAvailabilityBadge.classList.remove("is-ready");
     }
@@ -628,7 +586,7 @@ async function analyzeBlob(blob, filename) {
   const formData = new FormData();
   formData.append("image", blob, filename);
 
-  setReviewBusy(true, "正式模型分析中，正在切割與辨識單顆藥丸...");
+  setReviewBusy(true, "分析中，正在找出同一畫面內像藥丸或藥品的顆粒...");
   try {
     const response = await fetch(apiUrl("/api/analyze-image"), {
       method: "POST",
@@ -640,23 +598,21 @@ async function analyzeBlob(blob, filename) {
     }
 
     renderAnalysisResult(payload);
-    setHelper(
-      `正式模型完成分析，共找到 ${payload.totalCount} 個物件。背景接近與重疊問題已用加強分割處理。`,
-    );
+    setHelper(`分析完成，共找到 ${payload.totalCount} 顆候選物件。`);
   } catch (error) {
     console.error(error);
     const detail = isFileMode()
       ? `${error.message}。目前頁面是 file:// 模式，請先啟動 Flask 並保持 ${DEFAULT_LOCAL_API_BASE} 可連線。`
       : error.message;
     analysisMeta.innerHTML = `<p>分析失敗：${detail}</p>`;
-    setHelper(`正式模型分析失敗：${detail}`);
+    setHelper(`分析失敗：${detail}`);
   } finally {
     setReviewBusy(false);
   }
 }
 
 function renderAnalysisResult(result) {
-  updateModelCountUI(result.counts);
+  updateModelCountUI(result.totalCount);
   modelStatusText.textContent = result.modelStatus;
   analysisPreview.src = result.annotatedImage;
   analysisPreview.classList.add("is-visible");
@@ -671,7 +627,7 @@ function renderAnalysisResult(result) {
   if (!result.items.length) {
     pillItems.innerHTML = `
       <article class="pill-item empty-pill-item">
-        <p>這張圖沒有找到可計數的藥丸。</p>
+        <p>這張圖沒有找到可計數的藥丸或藥品顆粒。</p>
       </article>
     `;
     return;
@@ -682,16 +638,16 @@ function renderAnalysisResult(result) {
       const confidence =
         typeof item.confidence === "number"
           ? `${(item.confidence * 100).toFixed(1)}%`
-          : "未使用正式分類模型";
-      const title = item.pillName || `第 ${item.index} 顆 ${CLASS_STYLES[item.type].label}`;
+          : "規則式辨識";
+      const piecesText = item.pieces > 1 ? `，推估含 ${item.pieces} 顆` : "";
       return `
         <article class="pill-item">
-          <h3>${title}</h3>
-          <span class="pill-tag ${item.type}">${CLASS_STYLES[item.type].label}</span>
+          <h3>第 ${item.index} 個候選物件${piecesText}</h3>
+          <span class="pill-tag">候選顆粒</span>
           <div class="pill-meta">
-            <p>信心度：${confidence}</p>
+            <p>信心或模式：${confidence}</p>
             <p>長寬比：${item.shapeSummary.aspectRatio}</p>
-            <p>solidity：${item.shapeSummary.solidity}</p>
+            <p>填滿率：${item.shapeSummary.solidity}</p>
           </div>
         </article>
       `;
@@ -706,17 +662,8 @@ function captureCurrentFrameBlob() {
       return;
     }
 
-    snapshotCanvas.width = video.videoWidth;
-    snapshotCanvas.height = video.videoHeight;
     const ctx = snapshotCanvas.getContext("2d");
-    ctx.save();
-    if (state.mirrored) {
-      ctx.translate(snapshotCanvas.width, 0);
-      ctx.scale(-1, 1);
-    }
-    ctx.drawImage(video, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
-    ctx.restore();
-
+    drawFrameToCanvas(snapshotCanvas, ctx, video.videoWidth, video.videoHeight);
     snapshotCanvas.toBlob((blob) => {
       if (!blob) {
         reject(new Error("無法建立影像快照"));
@@ -729,6 +676,7 @@ function captureCurrentFrameBlob() {
 
 async function initialize() {
   resetAnalysisPane();
+  clearOverlay();
   const redirected = await autoRedirectToLocalServerIfAvailable();
   if (redirected) {
     return;
@@ -736,7 +684,7 @@ async function initialize() {
 
   if (isFileMode()) {
     setHelper(
-      `你目前是直接用檔案開啟頁面。即時計數可先使用，但正式模型分析會改連 ${DEFAULT_LOCAL_API_BASE}。`,
+      `你目前是直接用檔案開啟頁面。即時計數可先使用，但上傳分析會改連 ${DEFAULT_LOCAL_API_BASE}。`,
     );
   }
   await syncHealthStatus();
@@ -771,10 +719,6 @@ cameraSelect.addEventListener("change", async (event) => {
   }
 });
 
-annotationToggle.addEventListener("change", () => {
-  drawOverlay(state.detections);
-});
-
 countButton.addEventListener("click", async () => {
   if (!state.stream) {
     try {
@@ -799,11 +743,9 @@ countButton.addEventListener("click", async () => {
 confirmButton.addEventListener("click", announceConfirmation);
 
 flipButton.addEventListener("click", () => {
-  state.mirrored = !state.mirrored;
-  const transform = state.mirrored ? "scaleX(-1)" : "scaleX(1)";
-  video.style.transform = transform;
-  overlayCanvas.style.transform = transform;
-  setHelper(state.mirrored ? "畫面已顛倒，方便對應前鏡頭視角。" : "畫面已恢復正常方向。");
+  state.inverted = !state.inverted;
+  applyPreviewOrientation();
+  setHelper(state.inverted ? "畫面已旋轉 180 度。" : "畫面已恢復正常方向。");
 });
 
 logoutButton.addEventListener("click", resetSession);
@@ -832,7 +774,7 @@ reviewFrameButton.addEventListener("click", async () => {
   }
 });
 
-window.addEventListener("resize", () => drawOverlay(state.detections));
+window.addEventListener("resize", clearOverlay);
 window.addEventListener("beforeunload", stopStream);
 
 initialize();
