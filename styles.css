@@ -270,63 +270,9 @@ body {
   box-shadow: var(--shadow);
 }
 
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  margin-bottom: 24px;
-}
-
-.toggle-label {
-  color: #adb8c8;
-  font-size: 17px;
-}
-
-.switch {
-  position: relative;
-  width: 42px;
-  height: 24px;
-}
-
-.switch input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-}
-
-.switch-slider {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: #d8dee9;
-  transition: background var(--transition);
-}
-
-.switch-slider::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 3px 8px rgba(51, 63, 86, 0.14);
-  transition: transform var(--transition);
-}
-
-.switch input:checked + .switch-slider {
-  background: rgba(77, 156, 255, 0.38);
-}
-
-.switch input:checked + .switch-slider::before {
-  transform: translateX(18px);
-}
-
 .count-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -338,7 +284,7 @@ body {
 }
 
 .count-chip {
-  min-width: 72px;
+  min-width: 132px;
   padding: 10px 14px;
   border-radius: 7px;
   color: #fff;
@@ -348,16 +294,8 @@ body {
   box-shadow: 0 10px 20px rgba(46, 75, 120, 0.14);
 }
 
-.count-tablet .count-chip {
+.count-total .count-chip {
   background: linear-gradient(180deg, #f0b44c 0%, #d99922 100%);
-}
-
-.count-capsule .count-chip {
-  background: linear-gradient(180deg, #7bd862 0%, #58be43 100%);
-}
-
-.count-needle .count-chip {
-  background: linear-gradient(180deg, #ff8f90 0%, #ef676d 100%);
 }
 
 .count-value {
@@ -447,7 +385,7 @@ body {
 
 .result-count-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -553,18 +491,7 @@ body {
   font-size: 12px;
   font-weight: 700;
   color: #fff;
-}
-
-.pill-tag.tablet {
-  background: #eba638;
-}
-
-.pill-tag.capsule {
-  background: #63c949;
-}
-
-.pill-tag.needle {
-  background: #ef6f74;
+  background: #4d9cff;
 }
 
 .pill-meta {
@@ -589,23 +516,6 @@ body {
 
 .site-footer p {
   margin: 8px 0 0;
-}
-
-.footer-links {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-
-.footer-links a {
-  color: #67a9f2;
-  text-decoration: none;
-}
-
-.footer-links a:hover {
-  text-decoration: underline;
 }
 
 .info-page {
@@ -676,7 +586,6 @@ body {
   }
 
   .count-chip {
-    min-width: auto;
     width: 100%;
     font-size: 15px;
   }
